@@ -1,0 +1,274 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//
+// 🔷 USERS
+//
+model User {
+  id          String           @id @default(uuid())
+  name        String
+  email       String           @unique
+  role        Role
+  department  String?
+  createdAt   DateTime         @default(now())
+
+  inspections Inspection[]
+  assignments TaskAssignment[]
+  assignmentEvents TaskAssignmentEvent[]
+  statusEvents TaskStatusEvent[] @relation("TaskStatusActor")
+  notifications Notification[]
+  createdSchedules RecurringInspectionSchedule[] @relation("ScheduleCreator")
+  scheduleAssignments RecurringScheduleWorker[]
+}
+
+//
+// 🔷 LOCO
+//
+model Loco {
+  id         String   @id @default(uuid())
+  locoNumber String   @unique
+  createdAt  DateTime @default(now())
+
+  tasks      Task[]
+  notifications Notification[]
+  recurringSchedules RecurringInspectionSchedule[]
+}
+
+//
+// 🔷 TASK
+//
+model Task {
+  id             String           @id @default(uuid())
+  locoId         String
+  inspectionType String
+  templateId     String?
+  status         TaskStatus       @default(CREATED)
+  priority       Priority         @default(MEDIUM)
+  createdAt      DateTime         @default(now())
+
+  loco           Loco             @relation(fields: [locoId], references: [id])
+  template       InspectionTemplate? @relation(fields: [templateId], references: [id])
+  assignments    TaskAssignment[]
+  assignmentEvents TaskAssignmentEvent[]
+  statusEvents   TaskStatusEvent[]
+  notifications  Notification[]
+  inspections    Inspection[]
+}
+
+model TaskStatusEvent {
+  id        String     @id @default(uuid())
+  taskId    String
+  status    TaskStatus
+  actorId   String?
+  note      String?
+  createdAt DateTime   @default(now())
+
+  task      Task       @relation(fields: [taskId], references: [id])
+  actor     User?      @relation("TaskStatusActor", fields: [actorId], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+//
+// 🔷 TASK ASSIGNMENT
+//
+model TaskAssignment {
+  id       String @id @default(uuid())
+  taskId   String
+  workerId String
+  createdAt DateTime @default(now())
+
+  task     Task   @relation(fields: [taskId], references: [id])
+  worker   User   @relation(fields: [workerId], references: [id])
+
+  @@unique([taskId, workerId])
+}
+
+model TaskAssignmentEvent {
+  id        String                  @id @default(uuid())
+  taskId    String
+  workerId  String
+  eventType AssignmentEventType
+  createdAt DateTime                @default(now())
+
+  task      Task                    @relation(fields: [taskId], references: [id])
+  worker    User                    @relation(fields: [workerId], references: [id])
+}
+
+//
+// 🔷 INSPECTION TEMPLATE SYSTEM
+//
+model InspectionTemplate {
+  id               String         @id @default(uuid())
+  name             String         // W1, W2, Pantograph
+  status           TemplateStatus @default(DRAFT)
+  version          Int            @default(1)
+  sourceTemplateId String?
+  publishedAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  sourceTemplate   InspectionTemplate?  @relation("TemplateVersions", fields: [sourceTemplateId], references: [id])
+  versions         InspectionTemplate[] @relation("TemplateVersions")
+  tasks            Task[]
+  recurringSchedules RecurringInspectionSchedule[]
+  sections         Section[]
+  inspections      Inspection[]
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  taskId    String?
+  locoId    String?
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  task      Task?    @relation(fields: [taskId], references: [id])
+  loco      Loco?    @relation(fields: [locoId], references: [id])
+
+  @@index([userId, read, createdAt])
+}
+
+model RecurringInspectionSchedule {
+  id          String              @id @default(uuid())
+  locoId      String
+  templateId  String
+  priority    Priority            @default(MEDIUM)
+  frequency   RecurrenceFrequency
+  nextRunAt   DateTime
+  active      Boolean             @default(true)
+  createdById String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  loco        Loco                @relation(fields: [locoId], references: [id])
+  template    InspectionTemplate  @relation(fields: [templateId], references: [id])
+  createdBy   User?               @relation("ScheduleCreator", fields: [createdById], references: [id])
+  workers     RecurringScheduleWorker[]
+
+  @@index([active, nextRunAt])
+}
+
+model RecurringScheduleWorker {
+  id         String @id @default(uuid())
+  scheduleId String
+  workerId   String
+
+  schedule   RecurringInspectionSchedule @relation(fields: [scheduleId], references: [id])
+  worker     User                        @relation(fields: [workerId], references: [id])
+
+  @@unique([scheduleId, workerId])
+}
+
+model Section {
+  id          String    @id @default(uuid())
+  name        String
+  templateId  String
+  position    Int       @default(0)
+  active      Boolean   @default(true)
+
+  template    InspectionTemplate @relation(fields: [templateId], references: [id])
+  items       Item[]
+}
+
+model Item {
+  id         String   @id @default(uuid())
+  label      String
+  type       String   // text | number | boolean | mcq
+  sectionId  String
+  position   Int      @default(0)
+  active     Boolean  @default(true)
+  required   Boolean  @default(true)
+  placeholder String?
+  unit       String?
+  rangeMin   Float?
+  rangeMax   Float?
+  choices    Json?
+
+  section    Section  @relation(fields: [sectionId], references: [id])
+  responses  InspectionResponse[]
+}
+
+//
+// 🔷 INSPECTION (SUBMISSION)
+//
+model Inspection {
+  id          String               @id @default(uuid())
+  taskId      String
+  workerId    String
+  templateId  String
+  submitted   Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+
+  task        Task                 @relation(fields: [taskId], references: [id])
+  worker      User                 @relation(fields: [workerId], references: [id])
+  template    InspectionTemplate   @relation(fields: [templateId], references: [id])
+
+  responses   InspectionResponse[]
+}
+
+//
+// 🔷 RESPONSES (LINKED TO ITEMS)
+//
+model InspectionResponse {
+  id           String     @id @default(uuid())
+  inspectionId String
+  itemId       String
+  value        String
+  remark       String?
+
+  inspection   Inspection @relation(fields: [inspectionId], references: [id])
+  item         Item       @relation(fields: [itemId], references: [id])
+}
+
+//
+// 🔷 ENUMS
+//
+enum Role {
+  ADMIN
+  SUPERVISOR
+  WORKER
+}
+
+enum TaskStatus {
+  CREATED
+  ASSIGNED
+  REWORK
+  SUBMITTED
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssignmentEventType {
+  ASSIGNED
+  UNASSIGNED
+}
+
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
