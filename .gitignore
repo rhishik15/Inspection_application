@@ -1,5 +1,11 @@
 *.iml
 .gradle
+node_modules
+.env
+.env.*
+.DS_Store
+.expo
+.idea
 /local.properties
 /.idea/caches
 /.idea/libraries
